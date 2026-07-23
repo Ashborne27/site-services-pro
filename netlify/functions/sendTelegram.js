@@ -8,59 +8,74 @@ exports.handler = async (event) => {
       throw new Error('Le corps de la requête est vide.');
     }
 
-    const isBase64 = event.isBase64Encoded;
-    const bodyBuffer = isBase64 ? Buffer.from(event.body, 'base64') : Buffer.from(event.body, 'utf8');
+    const bodyBuffer = event.isBase64Encoded 
+      ? Buffer.from(event.body, 'base64') 
+      : Buffer.from(event.body, 'utf8');
 
-    let name, email, message, fileBuffer, fileName;
+    const headers = event.headers || {};
+    const contentType = headers['content-type'] || headers['Content-Type'] || '';
 
-    // Tentative de parsing JSON
+    let name = '';
+    let email = '';
+    let message = '';
+    let fileBuffer = null;
+    let fileName = 'document.pdf';
+
+    // 1. Tentative de lecture sous format JSON
     try {
-      const data = JSON.parse(bodyBuffer.toString('utf8'));
-      name = data.name;
-      email = data.email;
-      message = data.message;
-      if (data.fileData) {
-        const base64Content = data.fileData.includes(',') ? data.fileData.split(',')[1] : data.fileData;
-        fileBuffer = Buffer.from(base64Content, 'base64');
-        fileName = data.fileName || 'document.pdf';
-      }
-    } catch (e) {
-      // Si ce n'est pas du JSON, on analyse le flux multipart/form-data natif
-      const contentType = event.headers['content-type'] || event.headers['Content-Type'] || '';
-      
-      if (contentType.includes('multipart/form-data')) {
-        const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
-        if (!boundaryMatch) {
-          throw new Error('Multipart boundary introuvable.');
+      const textBody = bodyBuffer.toString('utf8');
+      if (textBody.trim().startsWith('{') || textBody.trim().startsWith('[')) {
+        const data = JSON.parse(textBody);
+        name = data.name || '';
+        email = data.email || '';
+        message = data.message || '';
+        if (data.fileData) {
+          const base64Content = data.fileData.includes(',') ? data.fileData.split(',')[1] : data.fileData;
+          fileBuffer = Buffer.from(base64Content, 'base64');
+          fileName = data.fileName || 'document.pdf';
         }
+      }
+    } catch (jsonErr) {
+      // Poursuite vers l'analyse multipart si le JSON échoue
+    }
+
+    // 2. Analyse Multipart / Form-Data si les champs textuels ne sont pas remplis
+    if (!name && !email && !message && contentType.includes('multipart/form-data')) {
+      const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+      if (boundaryMatch) {
         const boundary = boundaryMatch[1].replace(/^["']|["']$/g, '');
         const parts = splitBufferByBoundary(bodyBuffer, boundary);
 
         for (const part of parts) {
-          const headerEndIndex = part.indexOf('\r\n\r\n');
+          let headerEndIndex = part.indexOf(Buffer.from('\r\n\r\n'));
+          let headerOffset = 4;
+          if (headerEndIndex === -1) {
+            headerEndIndex = part.indexOf(Buffer.from('\n\n'));
+            headerOffset = 2;
+          }
           if (headerEndIndex === -1) continue;
-          
+
           const headersStr = part.subarray(0, headerEndIndex).toString('utf8');
-          const contentBuffer = part.subarray(headerEndIndex + 4, part.length - 2);
+          const contentBuffer = part.subarray(headerEndIndex + headerOffset, part.length - (headerOffset === 4 ? 2 : 1));
 
           const nameMatch = headersStr.match(/name="([^"]+)"/);
           if (!nameMatch) continue;
           const fieldName = nameMatch[1];
 
           if (fieldName === 'name') {
-            name = contentBuffer.toString('utf8');
+            name = contentBuffer.toString('utf8').trim();
           } else if (fieldName === 'email') {
-            email = contentBuffer.toString('utf8');
+            email = contentBuffer.toString('utf8').trim();
           } else if (fieldName === 'message') {
-            message = contentBuffer.toString('utf8');
+            message = contentBuffer.toString('utf8').trim();
           } else if (fieldName === 'file' || fieldName === 'document' || fieldName === 'fileData') {
             fileBuffer = contentBuffer;
             const filenameMatch = headersStr.match(/filename="([^"]+)"/);
-            fileName = filenameMatch ? filenameMatch[1] : 'document.pdf';
+            if (filenameMatch && filenameMatch[1]) {
+              fileName = filenameMatch[1];
+            }
           }
         }
-      } else {
-        throw new Error("Format de requête non supporté.");
       }
     }
 
@@ -75,9 +90,9 @@ exports.handler = async (event) => {
     form.append('chat_id', TELEGRAM_CHAT_ID);
 
     if (fileBuffer && fileBuffer.length > 0) {
-      form.append('caption', `Nom: ${name}\nEmail: ${email}\nMessage: ${message}`);
+      form.append('caption', `Nom: ${name || 'Non spécifié'}\nEmail: ${email || 'Non spécifié'}\nMessage: ${message || 'Aucun message'}`);
       const blob = new Blob([fileBuffer], { type: 'application/pdf' });
-      form.append('document', blob, fileName || 'document.pdf');
+      form.append('document', blob, fileName);
 
       const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
         method: 'POST',
@@ -89,7 +104,7 @@ exports.handler = async (event) => {
         throw new Error(result.description || 'Erreur de l API Telegram lors de l envoi du document.');
       }
     } else {
-      const text = `Nouveau message :\nNom: ${name}\nEmail: ${email}\nMessage: ${message}`;
+      const text = `Nouveau message :\nNom: ${name || 'Non spécifié'}\nEmail: ${email || 'Non spécifié'}\nMessage: ${message || 'Aucun message'}`;
       const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,6 +146,8 @@ function splitBufferByBoundary(buffer, boundary) {
     }
     if (buffer.subarray(start, start + 2).toString() === '\r\n') {
       start += 2;
+    } else if (buffer.subarray(start, start + 1).toString() === '\n') {
+      start += 1;
     }
     index = buffer.indexOf(boundaryBuf, start);
   }
