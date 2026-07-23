@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Services d'Excellence | Particuliers & Entreprises</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- jsPDF pour le téléchargement du devis -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans antialiased">
+    <!-- Notification PWA -->
+    <div id="pwa-install-banner" class="hidden bg-blue-600 text-white p-3 text-center flex justify-between items-center">
+        <span>Installez notre application pour un accès hors-ligne.</span>
+        <button id="install-btn" class="bg-white text-blue-600 px-4 py-1 rounded font-bold">Installer</button>
+    </div>
+
+    <!-- Guide Alert -->
+    <div class="bg-yellow-100 border-b border-yellow-200 p-4 text-center">
+        <p class="text-yellow-800 font-medium">Nouveau client ? <button onclick="toggleGuide()" class="underline font-bold text-yellow-900">Consultez notre guide des services</button></p>
+    </div>
+
+    <!-- Modal Guide -->
+    <div id="guide-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-lg shadow-xl max-w-lg w-full">
+            <h2 class="text-2xl font-bold mb-4">Guide des Services</h2>
+            <p class="mb-2">Nous couvrons toutes les spécialisations, du particulier à la grande multinationale.</p>
+            <ul class="list-disc pl-5 mb-4">
+                <li><strong>Correction et relecture :</strong> 6€ / 100 mots</li>
+                <li><strong>Tutoring French :</strong> 70€ / 1 heure</li>
+                <li><strong>Traduction :</strong> 20€ / 100 mots</li>
+                <li><strong>Transcription :</strong> 25€ / minute</li>
+            </ul>
+            <div class="flex justify-end gap-2">
+                <button onclick="downloadGuide()" class="bg-blue-600 text-white px-4 py-2 rounded">Télécharger le Guide</button>
+                <button onclick="toggleGuide()" class="bg-gray-300 text-gray-800 px-4 py-2 rounded">Fermer</button>
+            </div>
+        </div>
+    </div>
+
+    <main class="max-w-4xl mx-auto p-6 mt-8 bg-white shadow-lg rounded-xl">
+        <h1 class="text-3xl font-extrabold mb-6 text-center text-blue-900">Configurez votre Commande</h1>
+        
+        <form id="order-form" class="space-y-6">
+            <!-- Services Selection -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="border p-4 rounded-lg bg-gray-50">
+                    <label class="flex items-center space-x-2 font-bold">
+                        <input type="checkbox" id="srv-correction" class="form-checkbox text-blue-600 h-5 w-5" onchange="calculateQuote()">
+                        <span>Correction et relecture</span>
+                    </label>
+                    <input type="number" id="qty-correction" placeholder="Nombre de mots" class="mt-2 w-full border rounded p-2 hidden" oninput="calculateQuote()">
+                </div>
+                
+                <div class="border p-4 rounded-lg bg-gray-50">
+                    <label class="flex items-center space-x-2 font-bold">
+                        <input type="checkbox" id="srv-tutoring" class="form-checkbox text-blue-600 h-5 w-5" onchange="calculateQuote()">
+                        <span>Tutoring French</span>
+                    </label>
+                    <input type="number" id="qty-tutoring" placeholder="Nombre d'heures" class="mt-2 w-full border rounded p-2 hidden" oninput="calculateQuote()">
+                </div>
+
+                <div class="border p-4 rounded-lg bg-gray-50">
+                    <label class="flex items-center space-x-2 font-bold">
+                        <input type="checkbox" id="srv-traduction" class="form-checkbox text-blue-600 h-5 w-5" onchange="calculateQuote()">
+                        <span>Traduction</span>
+                    </label>
+                    <input type="number" id="qty-traduction" placeholder="Nombre de mots" class="mt-2 w-full border rounded p-2 hidden" oninput="calculateQuote()">
+                </div>
+
+                <div class="border p-4 rounded-lg bg-gray-50">
+                    <label class="flex items-center space-x-2 font-bold">
+                        <input type="checkbox" id="srv-transcription" class="form-checkbox text-blue-600 h-5 w-5" onchange="calculateQuote()">
+                        <span>Transcription</span>
+                    </label>
+                    <input type="number" id="qty-transcription" placeholder="Minutes d'audio" class="mt-2 w-full border rounded p-2 hidden" oninput="calculateQuote()">
+                </div>
+            </div>
+
+            <!-- Description -->
+            <div>
+                <label class="block font-bold mb-2">Description / Consignes spécifiques</label>
+                <textarea id="order-desc" rows="4" class="w-full border rounded-lg p-3" placeholder="Sujet, matière pour le tutoring, contexte de l'entreprise..."></textarea>
+            </div>
+
+            <!-- Devis Display -->
+            <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg flex flex-col md:flex-row justify-between items-center">
+                <div class="text-xl font-bold text-blue-900">Devis estimé : <span id="total-price">0</span> €</div>
+                <button type="button" onclick="downloadQuote()" class="mt-4 md:mt-0 bg-white border border-blue-600 text-blue-600 px-4 py-2 rounded shadow hover:bg-blue-50 transition">Télécharger le devis</button>
+            </div>
+
+            <!-- File Upload & Validation -->
+            <div class="border-t pt-6">
+                <h3 class="font-bold text-lg mb-4">Validation et Envoi</h3>
+                <label class="block mb-2 font-medium">Joindre votre document (PDF) :</label>
+                <input type="file" id="order-file" accept=".pdf" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 mb-6">
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <button type="button" onclick="submitOrder('whatsapp')" class="bg-green-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-600">Envoyer via WhatsApp</button>
+                    <button type="button" onclick="submitOrder('telegram')" class="bg-blue-500 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-600">Envoyer via Telegram</button>
+                    <button type="button" onclick="submitOrder('email')" class="bg-gray-800 text-white font-bold py-3 px-4 rounded-lg hover:bg-gray-900">Envoyer via E-mail</button>
+                </div>
+                <p id="status-msg" class="text-sm mt-4 text-center font-bold"></p>
+            </div>
+        </form>
+    </main>
+
+    <footer class="text-center p-6 mt-8 text-gray-500 border-t">
+        <p>Support Client : <a href="mailto:business03112004@gmail.com" class="text-blue-600 underline">business03112004@gmail.com</a></p>
+    </footer>
+
+    <script src="/js/app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js');
+        }
+    </script>
+</body>
+</html>

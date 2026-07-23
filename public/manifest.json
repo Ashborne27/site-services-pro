@@ -1,0 +1,21 @@
+{
+  "name": "Services Linguistiques Pro",
+  "short_name": "Services Pro",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "description": "Plateforme de services pour particuliers et entreprises : correction, tutoring, traduction et transcription.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
