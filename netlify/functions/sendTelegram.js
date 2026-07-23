@@ -8,7 +8,20 @@ exports.handler = async (event) => {
       throw new Error('Le corps de la requête est vide.');
     }
 
-    const data = JSON.parse(event.body);
+    // Décodage automatique si Netlify a encodé le corps en Base64
+    let rawBody = event.body;
+    if (event.isBase64Encoded) {
+      rawBody = Buffer.from(event.body, 'base64').toString('utf8');
+    }
+
+    // Sécurisation du parsing JSON
+    let data;
+    try {
+      data = JSON.parse(rawBody);
+    } catch (parseError) {
+      throw new Error("Le format des données reçues n'est pas un JSON valide.");
+    }
+
     const { name, email, message, fileData, fileName } = data;
     
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -19,11 +32,10 @@ exports.handler = async (event) => {
     }
 
     if (fileData) {
-      // Extraction sécurisée du contenu base64
+      // Extraction sécurisée du contenu base64 du fichier
       const base64Content = fileData.includes(',') ? fileData.split(',')[1] : fileData;
       const buffer = Buffer.from(base64Content, 'base64');
       
-      // Utilisation du FormData et Blob natifs de Node.js
       const form = new FormData();
       form.append('chat_id', TELEGRAM_CHAT_ID);
       form.append('caption', `Nom: ${name}\nEmail: ${email}\nMessage: ${message}`);
