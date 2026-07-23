@@ -8,22 +8,62 @@ exports.handler = async (event) => {
       throw new Error('Le corps de la requête est vide.');
     }
 
-    // Décodage automatique si Netlify a encodé le corps en Base64
-    let rawBody = event.body;
-    if (event.isBase64Encoded) {
-      rawBody = Buffer.from(event.body, 'base64').toString('utf8');
-    }
+    const isBase64 = event.isBase64Encoded;
+    const bodyBuffer = isBase64 ? Buffer.from(event.body, 'base64') : Buffer.from(event.body, 'utf8');
 
-    // Sécurisation du parsing JSON
-    let data;
+    let name, email, message, fileBuffer, fileName;
+
+    // Tentative de parsing JSON
     try {
-      data = JSON.parse(rawBody);
-    } catch (parseError) {
-      throw new Error("Le format des données reçues n'est pas un JSON valide.");
+      const data = JSON.parse(bodyBuffer.toString('utf8'));
+      name = data.name;
+      email = data.email;
+      message = data.message;
+      if (data.fileData) {
+        const base64Content = data.fileData.includes(',') ? data.fileData.split(',')[1] : data.fileData;
+        fileBuffer = Buffer.from(base64Content, 'base64');
+        fileName = data.fileName || 'document.pdf';
+      }
+    } catch (e) {
+      // Si ce n'est pas du JSON, on analyse le flux multipart/form-data natif
+      const contentType = event.headers['content-type'] || event.headers['Content-Type'] || '';
+      
+      if (contentType.includes('multipart/form-data')) {
+        const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+        if (!boundaryMatch) {
+          throw new Error('Multipart boundary introuvable.');
+        }
+        const boundary = boundaryMatch[1].replace(/^["']|["']$/g, '');
+        const parts = splitBufferByBoundary(bodyBuffer, boundary);
+
+        for (const part of parts) {
+          const headerEndIndex = part.indexOf('\r\n\r\n');
+          if (headerEndIndex === -1) continue;
+          
+          const headersStr = part.subarray(0, headerEndIndex).toString('utf8');
+          const contentBuffer = part.subarray(headerEndIndex + 4, part.length - 2);
+
+          const nameMatch = headersStr.match(/name="([^"]+)"/);
+          if (!nameMatch) continue;
+          const fieldName = nameMatch[1];
+
+          if (fieldName === 'name') {
+            name = contentBuffer.toString('utf8');
+          } else if (fieldName === 'email') {
+            email = contentBuffer.toString('utf8');
+          } else if (fieldName === 'message') {
+            message = contentBuffer.toString('utf8');
+          } else if (fieldName === 'file' || fieldName === 'document' || fieldName === 'fileData') {
+            fileBuffer = contentBuffer;
+            const filenameMatch = headersStr.match(/filename="([^"]+)"/);
+            fileName = filenameMatch ? filenameMatch[1] : 'document.pdf';
+          }
+        }
+      } else {
+        throw new Error("Format de requête non supporté.");
+      }
     }
 
-    const { name, email, message, fileData, fileName } = data;
-    
     const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
@@ -31,16 +71,12 @@ exports.handler = async (event) => {
       throw new Error('Les variables d environnement Telegram ne sont pas configurées.');
     }
 
-    if (fileData) {
-      // Extraction sécurisée du contenu base64 du fichier
-      const base64Content = fileData.includes(',') ? fileData.split(',')[1] : fileData;
-      const buffer = Buffer.from(base64Content, 'base64');
-      
-      const form = new FormData();
-      form.append('chat_id', TELEGRAM_CHAT_ID);
+    const form = new FormData();
+    form.append('chat_id', TELEGRAM_CHAT_ID);
+
+    if (fileBuffer && fileBuffer.length > 0) {
       form.append('caption', `Nom: ${name}\nEmail: ${email}\nMessage: ${message}`);
-      
-      const blob = new Blob([buffer], { type: 'application/pdf' });
+      const blob = new Blob([fileBuffer], { type: 'application/pdf' });
       form.append('document', blob, fileName || 'document.pdf');
 
       const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
@@ -52,9 +88,7 @@ exports.handler = async (event) => {
       if (!result.ok) {
         throw new Error(result.description || 'Erreur de l API Telegram lors de l envoi du document.');
       }
-
     } else {
-      // Envoi de texte classique
       const text = `Nouveau message :\nNom: ${name}\nEmail: ${email}\nMessage: ${message}`;
       const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
@@ -81,3 +115,24 @@ exports.handler = async (event) => {
     };
   }
 };
+
+function splitBufferByBoundary(buffer, boundary) {
+  const boundaryBuf = Buffer.from('--' + boundary);
+  const parts = [];
+  let start = 0;
+  let index = buffer.indexOf(boundaryBuf, start);
+  while (index !== -1) {
+    if (start > 0) {
+      parts.push(buffer.subarray(start, index));
+    }
+    start = index + boundaryBuf.length;
+    if (buffer.subarray(start, start + 2).toString() === '--') {
+      break;
+    }
+    if (buffer.subarray(start, start + 2).toString() === '\r\n') {
+      start += 2;
+    }
+    index = buffer.indexOf(boundaryBuf, start);
+  }
+  return parts;
+}
