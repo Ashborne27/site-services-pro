@@ -1,6 +1,3 @@
-const fetch = require('node-fetch');
-const FormData = require('form-data');
-
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
@@ -22,23 +19,27 @@ exports.handler = async (event) => {
     }
 
     if (fileData) {
-      // Extraction sécurisée du contenu base64 (avec ou sans préfixe data URL)
+      // Extraction sécurisée du contenu base64
       const base64Content = fileData.includes(',') ? fileData.split(',')[1] : fileData;
       const buffer = Buffer.from(base64Content, 'base64');
       
+      // Utilisation du FormData et Blob natifs de Node.js
       const form = new FormData();
       form.append('chat_id', TELEGRAM_CHAT_ID);
       form.append('caption', `Nom: ${name}\nEmail: ${email}\nMessage: ${message}`);
-      form.append('document', buffer, { filename: fileName || 'document.pdf' });
+      
+      const blob = new Blob([buffer], { type: 'application/pdf' });
+      form.append('document', blob, fileName || 'document.pdf');
 
       const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
         method: 'POST',
-        body: form,
-        headers: form.getHeaders() // Indispensable pour transmettre les frontières du formulaire multipart
+        body: form
       });
 
       const result = await response.json();
-      if (!result.ok) throw new Error(result.description || 'Erreur de l API Telegram lors de l envoi du document.');
+      if (!result.ok) {
+        throw new Error(result.description || 'Erreur de l API Telegram lors de l envoi du document.');
+      }
 
     } else {
       // Envoi de texte classique
@@ -50,7 +51,9 @@ exports.handler = async (event) => {
       });
 
       const result = await response.json();
-      if (!result.ok) throw new Error(result.description || 'Erreur de l API Telegram lors de l envoi du message.');
+      if (!result.ok) {
+        throw new Error(result.description || 'Erreur de l API Telegram lors de l envoi du message.');
+      }
     }
 
     return {
@@ -59,7 +62,7 @@ exports.handler = async (event) => {
     };
 
   } catch (error) {
-    console.error('Erreur d execution de la fonction Telegram:', error);
+    console.error('Erreur execution fonction Telegram:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: error.message })
