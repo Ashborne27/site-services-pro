@@ -1,57 +1,68 @@
-const axios = require('axios');
-const busboy = require('busboy');
+const fetch = require('node-fetch');
+const FormData = require('form-data');
 
 exports.handler = async (event) => {
-    // Vérification de la méthode
-    if (event.httpMethod !== 'POST') {
-        return { statusCode: 405, body: 'Method Not Allowed' };
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+  }
+
+  try {
+    if (!event.body) {
+      throw new Error('Le corps de la requête est vide.');
     }
 
-    return new Promise((resolve) => {
-        const bb = busboy({ headers: event.headers });
-        let fileBuffer = null;
-        let fileName = '';
-        let caption = '';
+    const data = JSON.parse(event.body);
+    const { name, email, message, fileData, fileName } = data;
+    
+    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-        bb.on('file', (name, file, info) => {
-            fileName = info.filename;
-            const chunks = [];
-            file.on('data', (data) => chunks.push(data));
-            file.on('end', () => { fileBuffer = Buffer.concat(chunks); });
-        });
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+      throw new Error('Les variables d environnement Telegram ne sont pas configurées.');
+    }
 
-        bb.on('field', (name, val) => {
-            if (name === 'caption') caption = val;
-        });
+    if (fileData) {
+      // Extraction sécurisée du contenu base64 (avec ou sans préfixe data URL)
+      const base64Content = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+      const buffer = Buffer.from(base64Content, 'base64');
+      
+      const form = new FormData();
+      form.append('chat_id', TELEGRAM_CHAT_ID);
+      form.append('caption', `Nom: ${name}\nEmail: ${email}\nMessage: ${message}`);
+      form.append('document', buffer, { filename: fileName || 'document.pdf' });
 
-        bb.on('finish', async () => {
-            if (!fileBuffer) {
-                return resolve({ statusCode: 400, body: 'No file uploaded' });
-            }
+      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
+        method: 'POST',
+        body: form,
+        headers: form.getHeaders() // Indispensable pour transmettre les frontières du formulaire multipart
+      });
 
-            // Récupération sécurisée des clés depuis l'environnement
-            const token = process.env.TELEGRAM_BOT_TOKEN;
-            const chatId = process.env.TELEGRAM_CHAT_ID;
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.description || 'Erreur de l API Telegram lors de l envoi du document.');
 
-            const form = new FormData();
-            form.append('chat_id', chatId);
-            form.append('caption', caption);
-            // Conversion du buffer pour axios
-            form.append('document', new Blob([fileBuffer]), fileName);
+    } else {
+      // Envoi de texte classique
+      const text = `Nouveau message :\nNom: ${name}\nEmail: ${email}\nMessage: ${message}`;
+      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: text })
+      });
 
-            try {
-                await axios.post(`https://api.telegram.org/bot${token}/sendDocument`, form, {
-                    headers: { 'Content-Type': 'multipart/form-data' }
-                });
-                resolve({ statusCode: 200, body: 'Success' });
-            } catch (error) {
-                console.error(error);
-                resolve({ statusCode: 500, body: 'Telegram API Error' });
-            }
-        });
+      const result = await response.json();
+      if (!result.ok) throw new Error(result.description || 'Erreur de l API Telegram lors de l envoi du message.');
+    }
 
-        // Pipe the body into busboy
-        bb.write(Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8'));
-        bb.end();
-    });
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ success: true })
+    };
+
+  } catch (error) {
+    console.error('Erreur d execution de la fonction Telegram:', error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: error.message })
+    };
+  }
 };
